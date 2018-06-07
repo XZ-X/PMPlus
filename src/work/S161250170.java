@@ -34,7 +34,7 @@ import java.io.IOException;
  * void writeFreeMemory(int offset, byte x)
  *
  */
-public class S161250xxx extends Schedule{
+public class S161250170 extends Schedule{
 
     @Override
     public void ProcessSchedule(Task[] arrivedTask, int[] cpuOperate) {
@@ -58,7 +58,7 @@ public class S161250xxx extends Schedule{
 
         BottomMonitor bottomMonitor = new BottomMonitor(filename,cpuNumber);
         BottomService bottomService = new BottomService(bottomMonitor);
-        Schedule schedule =  new S161250xxx();
+        Schedule schedule =  new S161250170();
         schedule.setBottomService(bottomService);
 
         //外部调用实现类
