@@ -54,7 +54,8 @@ public class S161250170 extends Schedule {
      * byte 12-15   任务资源表的存储地址（if any）
      */
     private final int TASK_LIST_ITEM_SIZE = 16;
-    private final int GETID = 0;
+
+    private final int GET_ID = 0;
     private final int GET_CPU_TIME = 4;
     private final int GET_RES_CNT = 8;
     private final int IS_VALID = 9;
@@ -85,26 +86,37 @@ public class S161250170 extends Schedule {
 
     @Override
     public void ProcessSchedule(Task[] arrivedTask, int[] cpuOperate) {
+        int timing = getTimeTick();
         int cpu = 0;
         int currentTaskIndex = readInt(TASK_PROCESS_INDEX_ADDR);
         int waitingListLength = readInt(TASK_LIST_INDEX_ADDR);
         releaseAll();
 
-
+        //refresh task state
+        while (currentTaskIndex < waitingListLength && readInt(lea(currentTaskIndex) + GET_CPU_TIME) <= 0) {
+            writeFreeMemory(lea(currentTaskIndex) + IS_VALID, ((byte) 0));
+            currentTaskIndex++;
+        }
+        storeInt(TASK_PROCESS_INDEX_ADDR, currentTaskIndex);
 
         int localIndex = currentTaskIndex;
         //当还有剩余任务&&CPU时间还有空余
         while (localIndex < waitingListLength && cpu < getCpuNumber()) {
-            //任务还未被处理
             if (readFreeMemory(lea(localIndex) + IS_VALID) == 1) {
-                //任务资源可获取
-                if (touchResource(lea(localIndex) + GET_RESOURCES, lea(localIndex) + GET_RES_CNT)) {
-                    int time = readInt(lea(localIndex) + GET_CPU_TIME);
-                    time--;
-                    storeInt(lea(localIndex) + GET_CPU_TIME, time);
-                    cpuOperate[cpu++] = readInt(lea(localIndex) + GETID);
+                //任务还未被处理
+                if (readInt(lea(localIndex) + GET_CPU_TIME) > 0) {
+                    int taskID = readInt(lea(localIndex) + GET_ID);
+                    //任务资源可获取
+                    if (touchResource(readInt(lea(localIndex) + GET_RESOURCES), readFreeMemory(lea(localIndex) + GET_RES_CNT))) {
+
+                        int time = readInt(lea(localIndex) + GET_CPU_TIME);
+                        cpuOperate[cpu++] = readInt(lea(localIndex) + GET_ID);
+                        time--;
+                        storeInt(lea(localIndex) + GET_CPU_TIME, time);
+                    }
                 }
             }
+            localIndex++;
         }
 
         //新到达的任务
@@ -120,12 +132,6 @@ public class S161250170 extends Schedule {
 
 //        int currentTaskAddr = readInt(CURRENT_TASK);
 
-        //refresh task state
-        while (readInt(lea(currentTaskIndex) + GET_CPU_TIME) <= 0) {
-            writeFreeMemory(lea(currentTaskIndex) + IS_VALID, ((byte) 0));
-            currentTaskIndex++;
-        }
-        storeInt(TASK_PROCESS_INDEX_ADDR, currentTaskIndex);
     }
 
     /**
@@ -151,7 +157,8 @@ public class S161250170 extends Schedule {
         int i = 0;
         boolean ret = true;
         for (; i < number; i++) {
-            if (!useResource(readFreeMemory(baseAddr + i))) {
+            byte src = readFreeMemory(baseAddr + i);
+            if (!useResource(src)) {
                 ret = false;
                 break;
             }
@@ -187,7 +194,7 @@ public class S161250170 extends Schedule {
         if (i < 32) {
             int bitmap = readInt(BIT_MAP_ADDR);
             int mask = ~(1 << i);
-            bitmap &= i;
+            bitmap &= mask;
             storeInt(BIT_MAP_ADDR, bitmap);
             return true;
         }
@@ -220,10 +227,10 @@ public class S161250170 extends Schedule {
         if (i < 32) {
             int bitmap = readInt(BIT_MAP_ADDR);
             int mask = 1 << i;
-            if ((bitmap & i) != 0) {
+            if ((bitmap & mask) != 0) {
                 return false;
             }
-            bitmap |= i;
+            bitmap |= mask;
             storeInt(BIT_MAP_ADDR, bitmap);
             return true;
         }
@@ -265,33 +272,37 @@ public class S161250170 extends Schedule {
         int index = readInt(TASK_LIST_INDEX_ADDR);
 
         int addr = lea(index);
-        storeInt(addr, task.tid);
-        addr += 4;
+        storeInt(addr + GET_ID, task.tid);
 
-        storeInt(addr, task.cpuTime);
-        addr += 4;
+        storeInt(addr + GET_CPU_TIME, task.cpuTime);
 
-        writeFreeMemory(addr, ((byte) task.resource.length));
-        addr++;
-
-        writeFreeMemory(addr, ((byte) 0));
-        addr++;
+        writeFreeMemory(addr + GET_RES_CNT, ((byte) task.resource.length));
+        //valid
+        writeFreeMemory(addr + IS_VALID, ((byte) 1));
 //        if (task.resource.length > 0) {
 //            writeFreeMemory(addr, ((byte) task.resource[0]));
 //        }
-        addr++;
 //        if (task.resource.length > 1) {
 //            writeFreeMemory(addr, ((byte) task.resource[1]));
 //        }
-        addr++;
 //        if (task.resource.length > 2) {
         int resource = storeResource(task.resource);
-        storeInt(addr, resource);
-        addr += 4;
+        storeInt(addr + GET_RESOURCES, resource);
 //        }
         index++;
         storeInt(TASK_LIST_INDEX_ADDR, index);
 
+    }
+
+    private int loadResAddr(int addr) {
+        if (addr == 0) {
+            //init
+            return TASK_RESOURCE_BASE_ADDR;
+        } else {
+            addr -= TASK_RESOURCE_BASE_ADDR;
+            addr %= TASK_RESOURCE_LIMIT;
+            return addr + TASK_RESOURCE_BASE_ADDR;
+        }
     }
 
     /**
@@ -303,11 +314,11 @@ public class S161250170 extends Schedule {
 //        if (resources.length <= 2) {
 //            return 0;
 //        } else {
-        int index = readInt(CURRENT_SPACE);
-        int baseAddr = index;
+        int index = loadResAddr(readInt(CURRENT_SPACE));
+        int baseAddr = loadResAddr(index);
         for (int i = 0; i < resources.length; i++) {
-            index %= TASK_RESOURCE_LIMIT;
-            writeFreeMemory(index++, ((byte) resources[i]));
+            writeFreeMemory(loadResAddr(index), ((byte) resources[i]));
+            index++;
         }
         index--;
         storeInt(CURRENT_SPACE, index);
