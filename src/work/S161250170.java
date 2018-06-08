@@ -50,10 +50,10 @@ public class S161250170 extends Schedule {
      * byte 4-7     剩余CPU时间
      * byte 8       资源个数
      * byte 9       valid
-     * byte 10-11   空
-     * byte 12-15   任务资源表的存储地址（if any）
+     * byte 10-15   空
+     * byte 16-31   RESOURCE
      */
-    private final int TASK_LIST_ITEM_SIZE = 16;
+    private final int TASK_LIST_ITEM_SIZE = 32;
 
     private final int GET_ID = 0;
     private final int GET_CPU_TIME = 4;
@@ -61,7 +61,7 @@ public class S161250170 extends Schedule {
     private final int IS_VALID = 9;
     //    private final int FIRST_RESOURCE = 10;
 //    private final int SECOND_RESOURCE = 11;
-    private final int GET_RESOURCES = 12;
+    private final int GET_RESOURCES = 16;
 
     /**
      * 4*4 = 16byte = 128 位 bitmap
@@ -75,11 +75,11 @@ public class S161250170 extends Schedule {
 
     private final int TASK_LIST_BASE_ADDR = 32;
 
-    private final int TASK_RESOURCE_BASE_ADDR = 4 * 1024;
+    private final int TASK_RESOURCE_BASE_ADDR = 20 * 1024;
 
     private final int PCB_LIMIT = TASK_RESOURCE_BASE_ADDR - TASK_LIST_BASE_ADDR;
 
-    private final int TASK_RESOURCE_LIMIT = 16 * 1024;
+    private final int TASK_RESOURCE_LIMIT = 0;
     //任务资源表的当前空闲地址
     private final int CURRENT_SPACE = 4;
 
@@ -88,10 +88,13 @@ public class S161250170 extends Schedule {
     public void ProcessSchedule(Task[] arrivedTask, int[] cpuOperate) {
         int timing = getTimeTick();
         int cpu = 0;
+        //储存新到达的任务
+        for (Task task : arrivedTask) {
+            storeTask(task);
+        }
         int currentTaskIndex = readInt(TASK_PROCESS_INDEX_ADDR);
         int waitingListLength = readInt(TASK_LIST_INDEX_ADDR);
         releaseAll();
-
         //refresh task state
         while (currentTaskIndex < waitingListLength && readInt(lea(currentTaskIndex) + GET_CPU_TIME) <= 0) {
             writeFreeMemory(lea(currentTaskIndex) + IS_VALID, ((byte) 0));
@@ -107,7 +110,7 @@ public class S161250170 extends Schedule {
                 if (readInt(lea(localIndex) + GET_CPU_TIME) > 0) {
                     int taskID = readInt(lea(localIndex) + GET_ID);
                     //任务资源可获取
-                    if (touchResource(readInt(lea(localIndex) + GET_RESOURCES), readFreeMemory(lea(localIndex) + GET_RES_CNT))) {
+                    if (touchResource(lea(localIndex) + GET_RESOURCES)) {
 
                         int time = readInt(lea(localIndex) + GET_CPU_TIME);
                         cpuOperate[cpu++] = readInt(lea(localIndex) + GET_ID);
@@ -119,16 +122,16 @@ public class S161250170 extends Schedule {
             localIndex++;
         }
 
-        //新到达的任务
-        for (Task task : arrivedTask) {
-            if (cpu < getCpuNumber()) {
-                if (touchResource(task)) {
-                    cpuOperate[cpu++] = task.tid;
-                    task.cpuTime--;
-                }
-            }
-            storeTask(task);
-        }
+//        //新到达的任务
+//        for (Task task : arrivedTask) {
+//            if (cpu < getCpuNumber()) {
+//                if (touchResource(task)) {
+//                    cpuOperate[cpu++] = task.tid;
+//                    task.cpuTime--;
+//                }
+//            }
+//            storeTask(task);
+//        }
 
 //        int currentTaskAddr = readInt(CURRENT_TASK);
 
@@ -141,41 +144,27 @@ public class S161250170 extends Schedule {
         return TASK_LIST_BASE_ADDR + ((index * TASK_LIST_ITEM_SIZE) % PCB_LIMIT);
     }
 
-    private boolean touchResource(Task task) {
-        boolean ret = true;
-        for (int resource : task.resource) {
-            if (!useResource(resource)) {
-                ret = false;
-                break;
-            }
-        }
-        releaseAll(task.resource);
-        return ret;
+//    private boolean touchResource(Task task) {
+//        boolean ret = true;
+//        for (int resource : task.resource) {
+//            if (!useResource(resource)) {
+//                ret = false;
+//                break;
+//            }
+//        }
+//        releaseAll(task.resource);
+//        return ret;
+//    }
+
+    private boolean touchResource(int baseAddr) {
+        return useResource(baseAddr);
     }
 
-    private boolean touchResource(int baseAddr, int number) {
-        int i = 0;
-        boolean ret = true;
-        for (; i < number; i++) {
-            byte src = readFreeMemory(baseAddr + i);
-            if (!useResource(src)) {
-                ret = false;
-                break;
-            }
-        }
-        if (!ret) {
-            for (int j = 0; j < i; j++) {
-                releaseResource(baseAddr + i);
-            }
-        }
-        return ret;
-    }
-
-    private void releaseAll(int[] resource) {
-        for (int res : resource) {
-            releaseResource(res);
-        }
-    }
+//    private void releaseAll(int[] resource) {
+//        for (int res : resource) {
+//            releaseResource(res);
+//        }
+//    }
 
     private void releaseAll() {
         storeInt(BIT_MAP_ADDR, 0);
@@ -184,88 +173,118 @@ public class S161250170 extends Schedule {
         storeInt(BIT_MAP_ADDR + 12, 0);
     }
 
-    private void releaseAll(int base, int number) {
-        for (int i = 0; i < number; i++) {
-            releaseResource(readFreeMemory(base + i));
-        }
-    }
+//    private void releaseAll(int base, int number) {
+//        for (int i = 0; i < number; i++) {
+//            releaseResource(readFreeMemory(base + i));
+//        }
+//    }
+//
+//    private boolean releaseResource(int i) {
+//        if (i < 32) {
+//            int bitmap = readInt(BIT_MAP_ADDR);
+//            int mask = ~(1 << i);
+//            bitmap &= mask;
+//            storeInt(BIT_MAP_ADDR, bitmap);
+//            return true;
+//        }
+//        if (i <= 64) {
+//            i -= 32;
+//            int bitmap = readInt(BIT_MAP_ADDR + 4);
+//            int mask = ~(1 << i);
+//            bitmap &= mask;
+//            storeInt(BIT_MAP_ADDR + 4, bitmap);
+//            return true;
+//        }
+//        if (i <= 96) {
+//            i -= 64;
+//            int bitmap = readInt(BIT_MAP_ADDR + 8);
+//            int mask = ~(1 << i);
+//            bitmap &= mask;
+//            storeInt(BIT_MAP_ADDR + 8, bitmap);
+//            return true;
+//        } else {
+//            i -= 96;
+//            int bitmap = readInt(BIT_MAP_ADDR + 12);
+//            int mask = ~(1 << i);
+//            bitmap &= mask;
+//            storeInt(BIT_MAP_ADDR + 12, bitmap);
+//            return true;
+//        }
+//    }
 
-    private boolean releaseResource(int i) {
-        if (i < 32) {
-            int bitmap = readInt(BIT_MAP_ADDR);
-            int mask = ~(1 << i);
-            bitmap &= mask;
-            storeInt(BIT_MAP_ADDR, bitmap);
-            return true;
-        }
-        if (i <= 64) {
-            i -= 32;
-            int bitmap = readInt(BIT_MAP_ADDR + 4);
-            int mask = ~(1 << i);
-            bitmap &= mask;
-            storeInt(BIT_MAP_ADDR + 4, bitmap);
-            return true;
-        }
-        if (i <= 96) {
-            i -= 64;
-            int bitmap = readInt(BIT_MAP_ADDR + 8);
-            int mask = ~(1 << i);
-            bitmap &= mask;
-            storeInt(BIT_MAP_ADDR + 8, bitmap);
+    private boolean useResource(int addr) {
+        int a1 = readInt(addr);
+        int a2 = readInt(addr + 4);
+        int a3 = readInt(addr + 8);
+        int a4 = readInt(addr + 12);
+        boolean b1 = true;
+        boolean b2 = true;
+        boolean b3 = true;
+        boolean b4 = true;
+        int map1 = readInt(BIT_MAP_ADDR);
+        int map2 = readInt(BIT_MAP_ADDR + 4);
+        int map3 = readInt(BIT_MAP_ADDR + 8);
+        int map4 = readInt(BIT_MAP_ADDR + 12);
+
+        b1 = (a1 & map1) == 0;
+        b2 = (a2 & map2) == 0;
+        b3 = (a3 & map3) == 0;
+        b4 = (a4 & map4) == 0;
+        if (b1 && b2 && b3 && b4) {
+            map1 |= a1;
+            map2 |= a2;
+            map3 |= a3;
+            map4 |= a4;
+            storeInt(BIT_MAP_ADDR, map1);
+            storeInt(BIT_MAP_ADDR + 4, map2);
+            storeInt(BIT_MAP_ADDR + 8, map3);
+            storeInt(BIT_MAP_ADDR + 12, map4);
             return true;
         } else {
-            i -= 96;
-            int bitmap = readInt(BIT_MAP_ADDR + 12);
-            int mask = ~(1 << i);
-            bitmap &= mask;
-            storeInt(BIT_MAP_ADDR + 12, bitmap);
-            return true;
+            return false;
         }
-    }
-
-    private boolean useResource(int i) {
-        if (i < 32) {
-            int bitmap = readInt(BIT_MAP_ADDR);
-            int mask = 1 << i;
-            if ((bitmap & mask) != 0) {
-                return false;
-            }
-            bitmap |= mask;
-            storeInt(BIT_MAP_ADDR, bitmap);
-            return true;
-        }
-        if (i <= 64) {
-            i -= 32;
-            int bitmap = readInt(BIT_MAP_ADDR + 4);
-            int mask = 1 << i;
-            if ((bitmap & mask) != 0) {
-                return false;
-            }
-            bitmap |= mask;
-            storeInt(BIT_MAP_ADDR + 4, bitmap);
-            return true;
-        }
-        if (i <= 96) {
-            i -= 64;
-            int bitmap = readInt(BIT_MAP_ADDR + 8);
-            int mask = 1 << i;
-            if ((bitmap & mask) != 0) {
-                return false;
-            }
-            bitmap |= mask;
-            storeInt(BIT_MAP_ADDR + 8, bitmap);
-            return true;
-        } else {
-            i -= 96;
-            int bitmap = readInt(BIT_MAP_ADDR + 12);
-            int mask = 1 << i;
-            if ((bitmap & mask) != 0) {
-                return false;
-            }
-            bitmap |= mask;
-            storeInt(BIT_MAP_ADDR + 12, bitmap);
-            return true;
-        }
+//        if (i < 32) {
+//            int bitmap = readInt(BIT_MAP_ADDR);
+//            int mask = 1 << i;
+//            if ((bitmap & mask) != 0) {
+//                return false;
+//            }
+//            bitmap |= mask;
+//            storeInt(BIT_MAP_ADDR, bitmap);
+//            return true;
+//        }
+//        if (i <= 64) {
+//            i -= 32;
+//            int bitmap = readInt(BIT_MAP_ADDR + 4);
+//            int mask = 1 << i;
+//            if ((bitmap & mask) != 0) {
+//                return false;
+//            }
+//            bitmap |= mask;
+//            storeInt(BIT_MAP_ADDR + 4, bitmap);
+//            return true;
+//        }
+//        if (i <= 96) {
+//            i -= 64;
+//            int bitmap = readInt(BIT_MAP_ADDR + 8);
+//            int mask = 1 << i;
+//            if ((bitmap & mask) != 0) {
+//                return false;
+//            }
+//            bitmap |= mask;
+//            storeInt(BIT_MAP_ADDR + 8, bitmap);
+//            return true;
+//        } else {
+//            i -= 96;
+//            int bitmap = readInt(BIT_MAP_ADDR + 12);
+//            int mask = 1 << i;
+//            if ((bitmap & mask) != 0) {
+//                return false;
+//            }
+//            bitmap |= mask;
+//            storeInt(BIT_MAP_ADDR + 12, bitmap);
+//            return true;
+//        }
     }
 
     private void storeTask(Task task) {
@@ -286,43 +305,65 @@ public class S161250170 extends Schedule {
 //            writeFreeMemory(addr, ((byte) task.resource[1]));
 //        }
 //        if (task.resource.length > 2) {
-        int resource = storeResource(task.resource);
-        storeInt(addr + GET_RESOURCES, resource);
+        storeResource(addr + GET_RESOURCES, task.resource);
+//        storeInt(addr + GET_RESOURCES, resource);
 //        }
         index++;
         storeInt(TASK_LIST_INDEX_ADDR, index);
 
     }
 
-    private int loadResAddr(int addr) {
-        if (addr == 0) {
-            //init
-            return TASK_RESOURCE_BASE_ADDR;
-        } else {
-            addr -= TASK_RESOURCE_BASE_ADDR;
-            addr %= TASK_RESOURCE_LIMIT;
-            return addr + TASK_RESOURCE_BASE_ADDR;
-        }
-    }
+//    private int loadResAddr(int addr) {
+//        if (addr == 0) {
+//            //init
+//            return TASK_RESOURCE_BASE_ADDR;
+//        } else {
+//            addr -= TASK_RESOURCE_BASE_ADDR;
+//            addr %= TASK_RESOURCE_LIMIT;
+//            return addr + TASK_RESOURCE_BASE_ADDR;
+//        }
+//    }
 
     /**
-     * 从第三个开始储存所需资源
-     *
-     * @return 资源数组的首地址
+     * 储存所需资源
      */
-    private int storeResource(int[] resources) {
+    private void storeResource(int addr, int[] resources) {
+        int a1 = 0;
+        int a2 = 0;
+        int a3 = 0;
+        int a4 = 0;
+        for (int resource : resources) {
+            switch (resource / 32) {
+                case 0:
+                    a1 |= 1 << resource;
+                    break;
+                case 1:
+                    a2 |= 1 << (resource - 32);
+                    break;
+                case 2:
+                    a3 |= 1 << (resource - 64);
+                    break;
+                case 3:
+                    a4 |= 1 << (resource - 96);
+                    break;
+            }
+        }
+        storeInt(addr, a1);
+        storeInt(addr + 4, a2);
+        storeInt(addr + 8, a3);
+        storeInt(addr + 12, a4);
 //        if (resources.length <= 2) {
 //            return 0;
 //        } else {
-        int index = loadResAddr(readInt(CURRENT_SPACE));
-        int baseAddr = loadResAddr(index);
-        for (int i = 0; i < resources.length; i++) {
-            writeFreeMemory(loadResAddr(index), ((byte) resources[i]));
-            index++;
-        }
-        index--;
-        storeInt(CURRENT_SPACE, index);
-        return baseAddr;
+//        int index = loadResAddr(readInt(CURRENT_SPACE));
+//        int baseAddr = loadResAddr(index);
+//        for (int i = 0; i < resources.length; i++) {
+//            writeFreeMemory(loadResAddr(index), ((byte) resources[i]));
+//            index++;
+//        }
+//        index--;
+//        storeInt(CURRENT_SPACE, index);
+//        return baseAddr;
 //        }
     }
 
@@ -340,6 +381,10 @@ public class S161250170 extends Schedule {
         int b1 = readFreeMemory(addr++);
         int b2 = readFreeMemory(addr++);
         int b3 = readFreeMemory(addr);
+        b0 &= 0xff;
+        b1 &= 0xff;
+        b2 &= 0xff;
+        b3 &= 0xff;
         return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
     }
 
@@ -363,7 +408,7 @@ public class S161250170 extends Schedule {
         schedule.setBottomService(bottomService);
 
         //外部调用实现类
-        for (int i = 0; i < 500; i++) {
+        for (int i = 0; i < 5000; i++) {
             Task[] tasks = bottomMonitor.getTaskArrived();
             int[] cpuOperate = new int[cpuNumber];
 

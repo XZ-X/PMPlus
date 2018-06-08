@@ -42,6 +42,10 @@ public class TaskState {
             this.leftCpuTime--;
     }
 
+    public int getTid() {
+        return tid;
+    }
+
     /**
      * 计算该任务的不满意得分
      * @return
